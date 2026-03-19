@@ -611,12 +611,10 @@ def LLM_R2(dataset, method, num_promos):
                 # attempt gpt api for max 3 times, if the previous try failed
                 print(str(rules_list_0) != "['Empty List']")
                 llm_time_start = time.time()
-                if str(rules_list_0) != "['Empty List']":
-                    trys = 0
-                    gpt_output_s = query_gpt_attempts(sim_prompt, trys)
-                    gpt_rules_s = filter_gpt_output(gpt_output_s)
-                else:
-                    gpt_rules_s = []
+                print("[DEBUG] calling LLM even though retrieved promo rules may be empty")
+                trys = 0
+                gpt_output_s = query_gpt_attempts(sim_prompt, trys)
+                gpt_rules_s = filter_gpt_output(gpt_output_s)
                 llm_time_end = time.time()
                 llm_time = llm_time_end - llm_time_start
                 llm_time_record.append(llm_time)
