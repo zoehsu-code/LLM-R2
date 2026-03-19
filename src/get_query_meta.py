@@ -30,6 +30,8 @@ reps = ["year", "date", "rank", "position", "YEAR", "DATE", "RANK", "POSITION", 
         "result", "MONTH", "Month", "month", "METHOD", "Method", "method", "RATING", "Rating", "rating", "CHARACTER",
         "Character", "RANGE", "Range", "range", "count"]
 
+GET_PHYSICAL_TREE_TIMEOUT = 20
+
 
 def process_plan_node(node_str, row_only):
     operator = node_str[:node_str.index('(')]
@@ -118,6 +120,9 @@ def get_logical_plan(db_id, sql_input):
 
 
 def get_physical_tree(db_id, sql_input, row_only=False):
+    print("[DEBUG] get_physical_tree start")
+    print("db_id:", db_id)
+    print("sql preview:", sql_input[:300])
     for s in reps:
         s = ' ' + s + ' '
         sql_input.replace(s, "'" + s + "'")
@@ -129,7 +134,14 @@ def get_physical_tree(db_id, sql_input, row_only=False):
 
     process = subprocess.Popen(command, shell=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                stderr=subprocess.PIPE, text=True)
-    output, error = process.communicate(input=input_string)
+    try:
+        output, error = process.communicate(input=input_string, timeout=GET_PHYSICAL_TREE_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        print("[ERROR] subprocess timeout in get_physical_tree")
+        print("db_id:", db_id)
+        print("sql full:", sql_input)
+        raise
 
     # Print the output and error messages
     # print("Output:\n", output)
@@ -160,4 +172,3 @@ def get_physical_tree(db_id, sql_input, row_only=False):
 # sql_input = "with my_customers as ( select distinct c_customer_sk  , c_current_addr_sk from  ( select cs_sold_date_sk sold_date_sk,  cs_bill_customer_sk customer_sk,  cs_item_sk item_sk,  cs_wholesale_cost wholesale_cost from catalog_sales union all select ws_sold_date_sk sold_date_sk,  ws_bill_customer_sk customer_sk,  ws_item_sk item_sk,  ws_wholesale_cost wholesale_cost from web_sales ) cs_or_ws_sales, item, date_dim, customer where sold_date_sk = d_date_sk and item_sk = i_item_sk and i_category = 'Men' and i_class = 'sports-apparel' and c_customer_sk = cs_or_ws_sales.customer_sk and d_moy = 8 and d_year = 2000 and wholesale_cost BETWEEN 59 AND 89 and c_birth_year BETWEEN 1936 AND 1949 ) , my_revenue as ( select c_customer_sk,  sum(ss_ext_sales_price) as revenue from my_customers,  store_sales,  customer_address,  store,  date_dim where c_current_addr_sk = ca_address_sk  and ca_county = s_county  and ca_state = s_state  and ss_sold_date_sk = d_date_sk  and c_customer_sk = ss_customer_sk  and ss_wholesale_cost BETWEEN 59 AND 89  and s_state in ('IL','LA','MO'   ,'MS','NJ','OH'   ,'SD','TN','VA'   ,'WY')  and d_month_seq between (select distinct d_month_seq+1   from date_dim where d_year = 2000 and d_moy = 8)   and (select distinct d_month_seq+3   from date_dim where d_year = 2000 and d_moy = 8) group by c_customer_sk ) , segments as (select cast((revenue/50) as int) as segment from my_revenue ) select segment, count(*) as num_customers, segment*50 as segment_base from segments group by segment order by segment, num_customers limit 100 ;"
 # print(get_logical_plan(db_id, sql_input))
 # print(get_physical_tree(db_id, sql_input))
-

@@ -41,14 +41,21 @@ model.eval()
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 model = model.to(device)
 
+DEBUG_POOL_LIMIT = 5
+
 
 def batcher(sentences, db_ids):
     # sentences = [[' '.join(s).replace('"', '')] for s in batch]
     # db_ids = ['tpch'] * len(sentences)
+    print(f"[DEBUG] batcher start: {len(sentences)} sentences")
     sent_features = prepare_enc_data(sentences, pre_lang_model, db_ids)
+    print("[DEBUG] after prepare_enc_data")
     batch = eval_collator(sent_features)
+    print("[DEBUG] after eval_collator")
     with torch.no_grad():
+        print("[DEBUG] before model forward")
         outputs = model(**batch, eval=True)
+        print("[DEBUG] after model forward")
         # pooler_output = outputs.hidden_states
         pooler_output = outputs
     return pooler_output.cpu()
@@ -490,14 +497,19 @@ def append_logical_plans(in_csv):
     print('logical plan appended')
 
 
-def get_pool(poll_csv, method):
+def get_pool(poll_csv, method, pool_limit=None):
     pool_df = pd.read_csv(poll_csv)
+    if pool_limit is not None:
+        pool_df = pool_df.head(pool_limit)
+    print(f"[DEBUG] get_pool start: {poll_csv}, method={method}, rows={len(pool_df)}")
     sentences = [edit_queries(x) for x in pool_df['original_sql'].tolist()]
     if method == 'sentbert':
         embeddings = pre_lang_model.encode(sentences)
     elif method == 'queryCL':
         batch2 = [[x] for x in pool_df['original_sql'].tolist()]
+        print("[DEBUG] before batcher")
         embeddings = batcher(batch2, pool_df['db_id'].tolist())
+        print("[DEBUG] after batcher")
     else:
         embeddings = []
     promo_pool = (pool_df['db_id'].tolist(), pool_df['original_sql'].tolist(),
@@ -521,15 +533,23 @@ def LLM_R2(dataset, method, num_promos):
     # append_logical_plans('pos_pool_' + dataset + '_updated.csv')
     # append_logical_plans('neg_pool_' + dataset + '_updated.csv')
     df_test = pd.read_csv('../data/data_llmr2/queries/queries_' + dataset + '_test.csv').fillna('NA')
-    promo_pool_pos = get_pool('../data/data_llmr2/pools/pos_pool_' + dataset + '_updated.csv', method)
-    promo_pool_neg = get_pool('../data/data_llmr2/pools/neg_pool_' + dataset + '_updated.csv', method)
+    df_test = df_test.head(10)
+    print(f"Running first {len(df_test)} queries from dataset={dataset}, method={method}")
+    pool_limit = DEBUG_POOL_LIMIT
+    promo_pool_pos = get_pool('./data/data_llmr2/pools/pos_pool_' + dataset + '_updated.csv',
+                              method, pool_limit=pool_limit)
+    promo_pool_neg = get_pool('./data/data_llmr2/pools/neg_pool_' + dataset + '_updated.csv',
+                              method, pool_limit=pool_limit)
 
     process_time_end = time.time()
     process_time = process_time_end - process_time_start
-    print('preprocess time: ', process_time)
+    print(f"preprocess_time: {process_time:.4f}s")
     print('query pool embeddings collected')
     for index, row in df_test.iterrows():
         if index >= 0:
+            print("\n" + "="*80)
+            print(f"Processing query #{index}")
+            print("="*80)
             df_i = {}
             db_id = row['db_id']
             db_ids.append(db_id)
@@ -591,12 +611,10 @@ def LLM_R2(dataset, method, num_promos):
                 # attempt gpt api for max 3 times, if the previous try failed
                 print(str(rules_list_0) != "['Empty List']")
                 llm_time_start = time.time()
-                if str(rules_list_0) != "['Empty List']":
-                    trys = 0
-                    gpt_output_s = query_gpt_attempts(sim_prompt, trys)
-                    gpt_rules_s = filter_gpt_output(gpt_output_s)
-                else:
-                    gpt_rules_s = []
+                print("[DEBUG] calling LLM even though retrieved promo rules may be empty")
+                trys = 0
+                gpt_output_s = query_gpt_attempts(sim_prompt, trys)
+                gpt_rules_s = filter_gpt_output(gpt_output_s)
                 llm_time_end = time.time()
                 llm_time = llm_time_end - llm_time_start
                 llm_time_record.append(llm_time)
@@ -652,8 +670,18 @@ def LLM_R2(dataset, method, num_promos):
                 prompt_queries_s.append(promo_queries)
                 prompt_rules_s.append(promo_rules)
 
+                print("\n[ORIGINAL SQL]")
                 print(query)
-                # print(rewrite_query)
+
+                print("\n[REWRITTEN SQL]")
+                print(rewrite_query_s)
+
+                print("\n[TIMING]")
+                print(f"demo_time: {demo_time:.4f}s")
+                print(f"llm_time: {llm_time:.4f}s")
+                print(f"rewriter_time: {rewriter_time:.4f}s")
+                print(f"total_time: {demo_time + llm_time + rewriter_time:.4f}s")
+
                 print(gpt_rules_s)
 
             if index % 500 == 0 and index > 0:
@@ -695,6 +723,6 @@ def LLM_R2(dataset, method, num_promos):
 # promo_pool_pos = get_pool('pos_pool_job_syn.csv', method)
 # promo_pool_neg = get_pool('neg_pool_job_syn.csv', method)
 method = 'queryCL'
-dataset = 'dsb'
+dataset = 'tpch'
 num_promos = 1
 LLM_R2(dataset, method, num_promos)
