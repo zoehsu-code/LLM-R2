@@ -41,14 +41,21 @@ model.eval()
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 model = model.to(device)
 
+DEBUG_POOL_LIMIT = 5
+
 
 def batcher(sentences, db_ids):
     # sentences = [[' '.join(s).replace('"', '')] for s in batch]
     # db_ids = ['tpch'] * len(sentences)
+    print(f"[DEBUG] batcher start: {len(sentences)} sentences")
     sent_features = prepare_enc_data(sentences, pre_lang_model, db_ids)
+    print("[DEBUG] after prepare_enc_data")
     batch = eval_collator(sent_features)
+    print("[DEBUG] after eval_collator")
     with torch.no_grad():
+        print("[DEBUG] before model forward")
         outputs = model(**batch, eval=True)
+        print("[DEBUG] after model forward")
         # pooler_output = outputs.hidden_states
         pooler_output = outputs
     return pooler_output.cpu()
@@ -490,14 +497,19 @@ def append_logical_plans(in_csv):
     print('logical plan appended')
 
 
-def get_pool(poll_csv, method):
+def get_pool(poll_csv, method, pool_limit=None):
     pool_df = pd.read_csv(poll_csv)
+    if pool_limit is not None:
+        pool_df = pool_df.head(pool_limit)
+    print(f"[DEBUG] get_pool start: {poll_csv}, method={method}, rows={len(pool_df)}")
     sentences = [edit_queries(x) for x in pool_df['original_sql'].tolist()]
     if method == 'sentbert':
         embeddings = pre_lang_model.encode(sentences)
     elif method == 'queryCL':
         batch2 = [[x] for x in pool_df['original_sql'].tolist()]
+        print("[DEBUG] before batcher")
         embeddings = batcher(batch2, pool_df['db_id'].tolist())
+        print("[DEBUG] after batcher")
     else:
         embeddings = []
     promo_pool = (pool_df['db_id'].tolist(), pool_df['original_sql'].tolist(),
@@ -523,8 +535,11 @@ def LLM_R2(dataset, method, num_promos):
     df_test = pd.read_csv('../data/data_llmr2/queries/queries_' + dataset + '_test.csv').fillna('NA')
     df_test = df_test.head(10)
     print(f"Running first {len(df_test)} queries from dataset={dataset}, method={method}")
-    promo_pool_pos = get_pool('../data/data_llmr2/pools/pos_pool_' + dataset + '_updated.csv', method)
-    promo_pool_neg = get_pool('../data/data_llmr2/pools/neg_pool_' + dataset + '_updated.csv', method)
+    pool_limit = DEBUG_POOL_LIMIT
+    promo_pool_pos = get_pool('./data/data_llmr2/pools/pos_pool_' + dataset + '_updated.csv',
+                              method, pool_limit=pool_limit)
+    promo_pool_neg = get_pool('./data/data_llmr2/pools/neg_pool_' + dataset + '_updated.csv',
+                              method, pool_limit=pool_limit)
 
     process_time_end = time.time()
     process_time = process_time_end - process_time_start
